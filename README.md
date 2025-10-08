@@ -1,6 +1,6 @@
-# plirborg — Prompt Language Intermediate Representation
+# pirborg — Prompt Language Intermediate Representation
 
-**plirborg** is an **internal representation (IR) for prompts**. It gives you structured building blocks to **write prompt optimizers** and **dialect‑specific codegen** with the same discipline compilers enjoy: clear semantics, static checks, and clean lowering paths.
+**pirborg** is an **Internal Representation for Prompts**, (PIR) for short. It gives you structured building blocks to **write prompt optimizers** and **dialect‑specific codegen** with the same discipline compilers enjoy: clear semantics, static checks, and clean lowering paths.
 
 ---
 
@@ -11,20 +11,20 @@
 * Offer **fine‑grained control** over what is optimizable (sections, inputs, slots, routes).
 * Support **multi-call prompt graphs** (e.g., ReAct chains), **bounded loops**, and **selection/judging** patterns.
 * Enable **extensible dialects** for code generation (back to DSPy, or to other runtimes such as Go).
-* Ship a **textual format (PLIR‑TXT)** and a **deterministic Python EDSL** with round‑trips between them.
+* Ship a **textual format (PIR‑TXT)** and a **deterministic Python EDSL** with round‑trips between them.
 * Supply **static analysis** and **lints** for template correctness and schema hygiene.
 
 ---
 
 ## Highlights
 
-* **IR, not runtime:** A compact Prompt IR (PIR) with a textual form (**PLIR‑TXT v1**) and a Python EDSL.
+* **IR, not runtime:** A compact Prompt IR (PIR) with a textual form (**PIR‑TXT v1**) and a Python EDSL.
 * **Deterministic authoring:** EDSL primitives ensure reproducible structures; templates default to strict semantics.
 * **Loops & graphs:** Express bounded loops and prompt graphs with selection criteria and optional judges.
 * **Optimizers:** Pluggable backends. **GEPA** works today; **DSPy** backend included; **OpenEvolve** and **ShinkaEvolve** on the roadmap.
 * **Static checks:** Lints for unused sections, channel violations, incomplete switches, schema collisions, and more.
 * **Template discipline:** Detect unused/unknown inputs, enforce placeholder usage, and produce actionable feedback.
-* **CLI tooling:** `plirborg fmt | lint | diff | render` for **PLIR‑TXT** files.
+* **CLI tooling:** `pirborg fmt | lint | diff | render` for **PIR‑TXT** files.
 
 ---
 
@@ -42,47 +42,47 @@ uv pip install pirbog
 
 ## Textual IR vs EDSL (side‑by‑side)
 
-Below, the **same prompt** in PLIR‑TXT and the Python EDSL.
+Below, the **same prompt** in PIR‑TXT and the Python EDSL.
 
-### PLIR‑TXT (v1)
+### PIR‑TXT (v1)
 
-```plirborg
-plirborg.module @examples.with_sections v1 {
-  plirborg.input %language : str {channel = "system", required}
-  plirborg.input %question : str {channel = "user", required}
+```pirborg
+pirborg.module @examples.with_sections v1 {
+  pirborg.input %language : str {channel = "system", required}
+  pirborg.input %question : str {channel = "user", required}
 
-  plirborg.section @persona {
+  pirborg.section @persona {
     channel = "system"
     optimizable
     description = "Sets assistant persona and tone."
     text = "You are concise and always respond in {{ inputs.language }}."
   }
 
-  plirborg.section @format {
+  pirborg.section @format {
     channel = "system"
     description = "Response contract."
     text = "Return JSON with an `answer` field only."
     output = {key="answer", json_type="string", required=true, description="Primary answer text"}
   }
 
-  plirborg.message "system" {
+  pirborg.message "system" {
     emit.section @persona
     emit.literal "\n"
     emit.section @format
   }
 
-  plirborg.message "user" {
+  pirborg.message "user" {
     emit.input %question
   }
 
-  plirborg.render { engine = "jinja2" strict_undefined }
+  pirborg.render { engine = "jinja2" strict_undefined }
 }
 ```
 
 ### Python EDSL
 
 ```python
-from plirborg.edsl import program, inp, section, output, predict
+from pirborg.edsl import program, inp, section, output, predict
 
 with program("examples.with_sections"):
     inp.str("language", channel="system")
@@ -119,7 +119,7 @@ Bounded loops are compiled into a deterministic **PromptGraph**. Here are two co
 ### Best‑of‑N with a judge
 
 ```python
-from plirborg.edsl import program, inp, predict, loop_unroll
+from pirborg.edsl import program, inp, predict, loop_unroll
 
 with program("qa.boN"):
     inp.str("question", channel="user")
@@ -148,7 +148,7 @@ with program("qa.boN"):
 ### Bounded refine loop with early stop
 
 ```python
-from plirborg.edsl import program, inp, predict, loop_unroll
+from pirborg.edsl import program, inp, predict, loop_unroll
 
 with program("qa.refine"):
     inp.str("question", channel="user")
@@ -172,11 +172,11 @@ with program("qa.refine"):
 Use a shared API to optimize **just the parts you’ve marked** optimizable.
 
 ```python
-from plirborg.optimizer import (
+from pirborg.optimizer import (
     optimize_prompt, EvalSuite,
 )
-from plirborg.optimizer.runners import CallableRunner
-from plirborg.optimizer.scorers import ContainsSubstringScorer
+from pirborg.optimizer.runners import CallableRunner
+from pirborg.optimizer.scorers import ContainsSubstringScorer
 
 # Your runner: how to execute messages against an LLM
 runner = CallableRunner(lambda messages, instance, candidate: "some model output")
@@ -207,7 +207,7 @@ optimized = result.optimized_prompt
 You can also discover and register optimizers:
 
 ```python
-from plirborg.optimizer import get_registered_optimizers, register_optimizer
+from pirborg.optimizer import get_registered_optimizers, register_optimizer
 
 print(get_registered_optimizers())  # ["dspy", "gepa", ...]
 
@@ -221,7 +221,7 @@ print(get_registered_optimizers())  # ["dspy", "gepa", ...]
 Mark **sections**, **inputs**, **slots**, and even **routes** as optimizable:
 
 ```python
-from plirborg import Section, Input, InputType, Slot, SlotOption
+from pirborg import Section, Input, InputType, Slot, SlotOption
 
 # Section toggles
 Section(name="closing", text="Summarize...", optimizable=True, description="Closing checklist")
@@ -249,8 +249,8 @@ Slot(
 * Lints for structural issues.
 
 ```python
-from plirborg.renderer import render_template
-from plirborg.lints import lint_prompt
+from pirborg.renderer import render_template
+from pirborg.lints import lint_prompt
 
 # Enforce unknown/unused inputs at render time
 rendered = render_template(prompt, prompt.template.system_tmpl,
@@ -272,7 +272,7 @@ This enables optimizers to surface **rich textual feedback** when templates viol
 Connect multiple prompts and external tools with typed contracts:
 
 ```python
-from plirborg import PromptSpec, GraphNode, PromptGraph, EdgeBinding, ExternalNode
+from pirborg import PromptSpec, GraphNode, PromptGraph, EdgeBinding, ExternalNode
 
 # Nodes
 qa = GraphNode(id="qa", prompt=prompt, entry=True)
@@ -291,26 +291,26 @@ graph = PromptGraph(id="react.example", nodes=[qa, grader], edges=edges, externa
 
 ---
 
-## CLI (plirborg‑TXT tools)
+## CLI (pirborg‑TXT tools)
 
 ```
-plirborg fmt   path.plirborg                    # format in place
-plirborg lint  path.plirborg                    # validate structure
-plirborg diff  left.plirborg right.plirborg         # unified diff
-plirborg render path.plirborg --inputs in.json  # render with JSON inputs (and --slots slots.json)
+pirborg fmt   path.pirborg                    # format in place
+pirborg lint  path.pirborg                    # validate structure
+pirborg diff  left.pirborg right.pirborg         # unified diff
+pirborg render path.pirborg --inputs in.json  # render with JSON inputs (and --slots slots.json)
 ```
 
 ---
 
 ## Round‑tripping
 
-Convert between PromptSpec and PLIR‑TXT:
+Convert between PromptSpec and PIR‑TXT:
 
 ```python
-from plirborg.text import module_from_prompt_spec, format_module, parse_module, prompt_spec_from_module
+from pirborg.text import module_from_prompt_spec, format_module, parse_module, prompt_spec_from_module
 
 module = module_from_prompt_spec(prompt)
-text = format_module(module)           # -> string in PLIR‑TXT
+text = format_module(module)           # -> string in PIR‑TXT
 parsed = parse_module(text)            # -> TextModule
 roundtrip = prompt_spec_from_module(parsed)  # -> PromptSpec
 ```
@@ -339,9 +339,9 @@ roundtrip = prompt_spec_from_module(parsed)  # -> PromptSpec
 ## Project layout
 
 ```
-plirborg/
+pirborg/
   edsl/        # Python EDSL (program, inputs, sections, slots, loops)
-  text/        # PLIR‑TXT parser, printer, CLI
+  text/        # PIR‑TXT parser, printer, CLI
   optimizer/   # backends (gepa, dspy), registry, runners, scorers
   pir.py       # Prompt IR ops + lowering from PromptSpec
   lints.py     # static lints
