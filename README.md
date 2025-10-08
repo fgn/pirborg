@@ -1,3 +1,8 @@
+<p align="center">
+  <img align="center" src="docs/docs/static/img/pirborg_logo.png" width="460px" />
+</p>
+<p align="left">
+
 # pirborg — Prompt Language Intermediate Representation
 
 **pirborg** is an **Internal Representation for Prompts**, (PIR) for short. It gives you structured building blocks to **write prompt optimizers** and **dialect‑specific codegen** with the same discipline compilers enjoy: clear semantics, static checks, and clean lowering paths.
