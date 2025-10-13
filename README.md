@@ -26,7 +26,7 @@
 * **IR, not runtime:** A compact Prompt IR (PIR) with a textual form (**PIR‑TXT v1**) and a Python EDSL.
 * **Deterministic authoring:** EDSL primitives ensure reproducible structures; templates default to strict semantics.
 * **Loops & graphs:** Express bounded loops and prompt graphs with selection criteria and optional judges.
-* **Optimizers:** Pluggable backends. **GEPA** works today; **DSPy** backend included; **OpenEvolve** and **ShinkaEvolve** on the roadmap.
+* **Optimizers:** Pluggable backends. **GEPA** works today; **DSPy** optimizers MIPROv2, SIMBA etc, **OpenEvolve** and **ShinkaEvolve** on the roadmap.
 * **Static checks:** Lints for unused sections, channel violations, incomplete switches, schema collisions, and more.
 * **Template discipline:** Detect unused/unknown inputs, enforce placeholder usage, and produce actionable feedback.
 * **CLI tooling:** `pirborg fmt | lint | diff | render` for **PIR‑TXT** files.
@@ -46,7 +46,7 @@ uv pip install pirbog
 
 
 
-> GEPA backend requires the `gepa` package; DSPy backend requires `dspy-ai`. Install them as needed.
+> GEPA backend requires the `gepa` package; Install as needed.
 
 ---
 
