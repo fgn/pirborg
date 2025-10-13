@@ -5,7 +5,93 @@
 
 # pirborg — Prompt Language Intermediate Representation
 
-**pirborg** is an **Internal Representation for Prompts**, (PIR) for short. It gives you structured building blocks to **write prompt optimizers** and **dialect‑specific codegen** with the same discipline compilers enjoy: clear semantics, static checks, and clean lowering paths.
+> **pirborg is an Intermediate Representation (IR), not a hand-authored prompt language.**  
+> You typically **author in a frontend** (e.g., **DSPy**), then **lower to PIR** for analysis, linting, optimization, and codegen. The IR is **verbose by design**, machine-friendly, **deterministic**, and **inspectable** (via **PIR‑TXT**). It comes with **template lints** and **textual feedback** so *reflective optimizers* can **self‑adjust** their template layouts during training.
+
+If **DSPy** introduced structured programming to prompt authoring by turning monolithic prompt blobs into modular functions with typed interfaces, then **pirborg** aims to be the MLIR-equivalent for prompts. It provides an intermediate representation (IR) featuring a clear symbol table, explicit control flow, and well-defined operators, enabling powerful compiler transformations such as operator fusion, splitting, and targeted optimizations.
+
+DSPy is brilliant, and in most cases, you should continue to use DSPy directly. pirborg is designed specifically for advanced compilation workflows, fine-grained optimization, and tooling scenarios where deterministic transformations and robust intermediate representations are essential.
+
+---
+
+## The fast path (first screenful): DSPy → PIR → Optimizer
+
+### 1) Author ergonomically (DSPy)
+
+```python
+# Developer-friendly authoring in DSPy
+import dspy
+
+class QA(dspy.Signature):
+    """Answer precisely, return an 'answer' string."""
+    question: str
+    answer: str
+
+class Answer(dspy.Module):
+    def __init__(self):
+        self.pred = dspy.Predict(QA)
+
+    def forward(self, question: str):
+        return self.pred(question=question)
+```
+
+### 2) Lower to pirborg (IR): same contract, structured internals
+
+> In practice a tool does this for you; shown here for transparency.
+
+```python
+from pirborg.edsl import program, inp, section, output, predict
+
+with program("readme.layers.qa_v1"):
+    inp.str("question", channel="user", required=True)
+
+    # Frozen response contract (keeps the optimizer honest)
+    section(
+        "format",
+        channel="system",
+        text="Return JSON with an `answer` field only.",
+        output=output("answer", description="Primary answer text"),
+        description="Response contract.",
+    )
+
+    # Thaw persona/style only: optimizer may rewrite this
+    section(
+        "persona",
+        channel="system",
+        text="You are concise and accurate. If uncertain, say so.",
+        optimizable=True,
+        description="Assistant stance and tone.",
+    )
+
+    qa_prompt = predict(
+        system="{{ emit_section('persona') }}\\n{{ emit_section('format') }}",
+        user="Q: {{ inputs.question }}",
+        id="readme.layers.qa_v1.base",
+    )
+```
+
+### 3) Optimize (respecting frozen vs. optimizable parts)
+
+```python
+from pirborg.optimizer import optimize_prompt, EvalSuite
+from pirborg.optimizer.runners import CallableRunner
+from pirborg.optimizer.scorers import ContainsSubstringScorer
+
+runner = CallableRunner(lambda messages, instance, candidate: "some model output")
+scorer = ContainsSubstringScorer(substr="concise")
+evals = EvalSuite(runner=runner, scorer=scorer)
+
+result = optimize_prompt(
+    prompt=qa_prompt,       # a PromptSpec
+    optimizer="gepa",       # example backend
+    trainset=[{"inputs": {"question": "Why is caching fast?"}, "label": "..."}],
+    valset=None,
+    evals=evals,
+)
+optimized = result.optimized_prompt
+```
+
+**Takeaway:** Author in **DSPy** (or another frontend). Lower to **PIR**. Let the optimizer explore **only** the parts you mark `optimizable=True`, while **frozen** sections (e.g., format contracts, routing) stay invariant.
 
 ---
 
@@ -14,7 +100,7 @@
 * Make writing **prompt optimizers** simple and safe.
 * Provide a **stable IR** that tools can target and generate from.
 * Offer **fine‑grained control** over what is optimizable (sections, inputs, slots, routes).
-* Support **multi-call prompt graphs** (e.g., ReAct chains), **bounded loops**, and **selection/judging** patterns.
+* Support **multi‑call prompt graphs** (e.g., ReAct chains), **bounded loops**, and **selection/judging** patterns.
 * Enable **extensible dialects** for code generation (back to DSPy, or to other runtimes such as Go).
 * Ship a **textual format (PIR‑TXT)** and a **deterministic Python EDSL** with round‑trips between them.
 * Supply **static analysis** and **lints** for template correctness and schema hygiene.
@@ -25,14 +111,13 @@
 
 * **IR, not runtime:** A compact Prompt IR (PIR) with a textual form (**PIR‑TXT v1**) and a Python EDSL.
 * **Deterministic authoring:** EDSL primitives ensure reproducible structures; templates default to strict semantics.
+* **Partition + freeze/thaw:** Mark specific **sections/inputs/routes** as optimizable; freeze the rest to bound the search.
 * **Loops & graphs:** Express bounded loops and prompt graphs with selection criteria and optional judges.
 * **Optimizers:** Pluggable backends. **GEPA** works today; **DSPy** optimizers MIPROv2, SIMBA etc, **OpenEvolve** and **ShinkaEvolve** on the roadmap.
-* **Static checks:** Lints for unused sections, channel violations, incomplete switches, schema collisions, and more.
-* **Template discipline:** Detect unused/unknown inputs, enforce placeholder usage, and produce actionable feedback.
+* **Static checks & feedback:** Lints for unused sections, channel violations, incomplete switches, schema collisions, and more—with **textual feedback** designed for reflective optimizers.
 * **CLI tooling:** `pirborg fmt | lint | diff | render` for **PIR‑TXT** files.
 
 ---
-
 
 ## Status
 
@@ -41,18 +126,141 @@ Early-stage software, APIs subject to change. Currently in the process of being 
 ## Install (from source)
 
 ```bash
-uv pip install pirbog
+# from a clone of this repo
+uv pip install -e .
+
+# optional: optimizer backends
+uv pip install gepa     # for GEPA backend
+```
+> GEPA backend requires the `gepa` package; install as needed.
+
+---
+
+## Blob → Blocks: a worked example (extended)
+
+We start with **one blob** (1950s-style). We end with **partitioned** sections that an optimizer can safely explore—while our **I/O contract** stays fixed.
+
+### 0) The blob (what you probably ship today)
+
+```python
+SYSTEM = "You are a helpful assistant. Return JSON with an `answer` only."
+USER   = "Question: {{question}}"
 ```
 
+### 1) Make inputs/outputs explicit (still one message)
 
+```python
+from pirborg.edsl import program, inp, section, output, predict
 
-> GEPA backend requires the `gepa` package; Install as needed.
+with program("readme.blob_to_blocks.v1"):
+    inp.str("question", channel="user", required=True)
+
+    section(
+        "format",
+        channel="system",
+        text="Return JSON with an `answer` field only.",
+        output=output("answer", description="Primary answer text"),
+        description="Response contract.",
+    )
+
+    prompt_v1 = predict(
+        system="{{ emit_section('format') }}",
+        user="Q: {{ inputs.question }}",
+        id="readme.blob_to_blocks.v1",
+    )
+```
+
+### 2) Partition into **sections** (start of structure)
+
+```python
+with program("readme.blob_to_blocks.v2"):
+    inp.str("question", channel="user", required=True)
+
+    section(
+        "persona",
+        channel="system",
+        optimizable=True,  # let optimizers rewrite only this wording
+        text="You are concise, accurate, and cite facts when uncertain.",
+        description="Assistant tone and stance.",
+    )
+
+    section(
+        "format",
+        channel="system",
+        text="Return JSON with an `answer` field only.",
+        output=output("answer", description="Primary answer text"),
+        description="Response contract (frozen).",
+    )
+
+    base_v2 = predict(
+        system="{{ emit_section('persona') }}\\n{{ emit_section('format') }}",
+        user="Q: {{ inputs.question }}",
+        id="readme.blob_to_blocks.v2.base",
+    )
+```
+
+### 3) Add **routes** (audience-aware style)
+
+```python
+with program("readme.blob_to_blocks.v3"):
+    inp.str("question", channel="user", required=True)
+    inp.str("audience", channel="user", required=True)  # e.g., "exec" | "student"
+
+    section("persona", channel="system", optimizable=True,
+            text="You are concise, accurate, and cite facts when uncertain.")
+
+    section("style_exec", channel="system", optimizable=True,
+            text="Use terse bullet points and ROI framing.")
+
+    section("style_student", channel="system", optimizable=True,
+            text="Use clear examples and define terms.")
+
+    section("format", channel="system",
+            text="Return JSON with an `answer` field only.",
+            output=output("answer", description="Primary answer text"))
+
+    base_v3 = predict(
+        system=(
+            "{{ emit_section('persona') }}\\n"
+            "{% if inputs.audience == 'exec' %}{{ emit_section('style_exec') }}"
+            "{% else %}{{ emit_section('style_student') }}{% endif %}\\n"
+            "{{ emit_section('format') }}"
+        ),
+        user="Q: {{ inputs.question }}",
+        id="readme.blob_to_blocks.v3.base",
+    )
+```
+
+### 4) Bounded best‑of‑N with a judge (PromptGraph)
+
+```python
+from pirborg.edsl import loop_unroll, predict
+
+judge = predict(
+    system="Score the candidate 0..1 for factuality and directness.",
+    user="Q: {{ inputs.question }}\\nCandidate: {{ inputs.candidate }}",
+    id="readme.blob_to_blocks.v4.judge",
+)
+
+bo3 = loop_unroll(
+    name="best_of_3",
+    max_iters=3,
+    body=base_v3,
+    feed={"question": "inputs.question", "audience": "inputs.audience"},
+    select={
+        "kind": "argmax",
+        "score_field": "score",
+        "judge": judge,
+        "judge_feed": {"candidate": "step.output.answer"},
+    },
+)
+```
 
 ---
 
 ## Textual IR vs EDSL (side‑by‑side)
 
-Below, the **same prompt** in PIR‑TXT and the Python EDSL.
+The **same prompt** in PIR‑TXT and the Python EDSL.
 
 ### PIR‑TXT (v1)
 
@@ -77,7 +285,7 @@ pirborg.module @examples.with_sections v1 {
 
   pirborg.message "system" {
     emit.section @persona
-    emit.literal "\n"
+    emit.literal "\\n"
     emit.section @format
   }
 
@@ -114,64 +322,9 @@ with program("examples.with_sections"):
     )
 
     prompt = predict(
-        system="{{ emit_section('persona') }}\n{{ emit_section('format') }}",
+        system="{{ emit_section('persona') }}\\n{{ emit_section('format') }}",
         user="{{ inputs.question }}",
         id="examples.with_sections",
-    )
-```
-
----
-
-## Loops and selection
-
-Bounded loops are compiled into a deterministic **PromptGraph**. Here are two common patterns:
-
-### Best‑of‑N with a judge
-
-```python
-from pirborg.edsl import program, inp, predict, loop_unroll
-
-with program("qa.boN"):
-    inp.str("question", channel="user")
-
-    base = predict(system="Be accurate.", user="{{ inputs.question }}", id="qa.base")
-    judge = predict(
-        system="Score candidate 0..1 for factuality and relevance.",
-        user="Q: {{ inputs.question }}\nCandidate: {{ inputs.candidate }}",
-        id="qa.judge",
-    )
-
-    bo5 = loop_unroll(
-        name="bo5",
-        max_iters=5,
-        body=base,
-        feed={"question": "inputs.question"},
-        select={
-            "kind": "argmax",
-            "score_field": "score",
-            "judge": judge,
-            "judge_feed": {"candidate": "step.output.answer"},
-        },
-    )
-```
-
-### Bounded refine loop with early stop
-
-```python
-from pirborg.edsl import program, inp, predict, loop_unroll
-
-with program("qa.refine"):
-    inp.str("question", channel="user")
-    base = predict(system="Be accurate.", user="{{ inputs.question }}", id="qa.base")
-
-    refine = loop_unroll(
-        name="refine",
-        max_iters=3,
-        body=base,
-        feed={"question": "inputs.question + state.feedback_suffix"},
-        state={"feedback_suffix": "''"},
-        update={"feedback_suffix": "'\\nPlease correct: ' + step.output.critique"},
-        select={"kind": "first_success", "predicate": "step.output.confidence >= 0.9"},
     )
 ```
 
@@ -188,14 +341,10 @@ from pirborg.optimizer import (
 from pirborg.optimizer.runners import CallableRunner
 from pirborg.optimizer.scorers import ContainsSubstringScorer
 
-# Your runner: how to execute messages against an LLM
 runner = CallableRunner(lambda messages, instance, candidate: "some model output")
-
-# Your scorer: how to score outputs
 scorer = ContainsSubstringScorer()
 evals = EvalSuite(runner=runner, scorer=scorer)
 
-# Optimize with GEPA (requires 'gepa' installed)
 result = optimize_prompt(
     prompt,            # a PromptSpec
     optimizer="gepa",  # or "dspy"
@@ -219,7 +368,6 @@ You can also discover and register optimizers:
 from pirborg.optimizer import get_registered_optimizers, register_optimizer
 
 print(get_registered_optimizers())  # ["dspy", "gepa", ...]
-
 # register_optimizer("myopt", lambda **kw: MyBackend(...))
 ```
 
@@ -232,14 +380,11 @@ Mark **sections**, **inputs**, **slots**, and even **routes** as optimizable:
 ```python
 from pirborg import Section, Input, InputType, Slot, SlotOption
 
-# Section toggles
 Section(name="closing", text="Summarize...", optimizable=True, description="Closing checklist")
 
-# Input toggles and hints
 Input(name="segment", type=InputType.ENUM, enum=["new_user","power_user"], optimizable=True,
       optimizer_hints={"default": "new_user"})
 
-# Slot with options and initial hint
 Slot(
   name="resolution_mode",
   options=[SlotOption(id="guided", text="Step-by-step"), SlotOption(id="escalate", text="Escalate to human")],
@@ -261,12 +406,10 @@ Slot(
 from pirborg.renderer import render_template
 from pirborg.lints import lint_prompt
 
-# Enforce unknown/unused inputs at render time
 rendered = render_template(prompt, prompt.template.system_tmpl,
                            inputs={"language": "Swedish", "extraneous": 1},
                            enforce_unknown_inputs=True)  # raises on "extraneous"
 
-# Run lints (unused sections, channel violations, incomplete switches, schema duplicates)
 issues = lint_prompt(prompt)
 for issue in issues:
     print(issue.code, issue.message)
@@ -283,14 +426,11 @@ Connect multiple prompts and external tools with typed contracts:
 ```python
 from pirborg import PromptSpec, GraphNode, PromptGraph, EdgeBinding, ExternalNode
 
-# Nodes
 qa = GraphNode(id="qa", prompt=prompt, entry=True)
 grader = GraphNode(id="grader", prompt=judge_prompt)
 
-# External tool with strict I/O shape
 web = ExternalNode(id="browser", inputs_schema={"query":"string"}, outputs_schema={"snippets":"array"})
 
-# Edges: route JSON outputs to downstream inputs
 edges = [
     EdgeBinding(from_node="qa", json_path="$.answer", to_input="grader.inputs.candidate"),
 ]
@@ -305,15 +445,13 @@ graph = PromptGraph(id="react.example", nodes=[qa, grader], edges=edges, externa
 ```
 pirborg fmt   path.pirborg                    # format in place
 pirborg lint  path.pirborg                    # validate structure
-pirborg diff  left.pirborg right.pirborg         # unified diff
+pirborg diff  left.pirborg right.pirborg      # unified diff
 pirborg render path.pirborg --inputs in.json  # render with JSON inputs (and --slots slots.json)
 ```
 
 ---
 
-## Round‑tripping
-
-Convert between PromptSpec and PIR‑TXT:
+## Textual IR (PIR‑TXT) round‑tripping
 
 ```python
 from pirborg.text import module_from_prompt_spec, format_module, parse_module, prompt_spec_from_module
@@ -337,10 +475,13 @@ roundtrip = prompt_spec_from_module(parsed)  # -> PromptSpec
 
 ## Examples in this repo
 
-* `examples/edsl_cot_partitioned.py` — chain‑of‑thought with partitioned reasoning
-* `examples/edsl_loop_best_of_n.py` — best‑of‑N with a judge
-* `examples/edsl_loop_refine.py` — bounded refine loop with early stop
-* `examples/text_ir_showcase.py` — render a prompt as PLIR‑TXT
+* `examples/edsl_blob_to_blocks_v1.py` — one message with input/output  
+* `examples/edsl_blob_to_blocks_v2_sections.py` — persona/format split; optimizer scope  
+* `examples/edsl_blob_to_blocks_v3_routes.py` — audience‑aware style routing  
+* `examples/edsl_blob_to_blocks_v4_bo3.py` — best‑of‑3 with a judge (PromptGraph)  
+* `examples/edsl_loop_best_of_n.py` — best‑of‑N with a judge  
+* `examples/edsl_loop_refine.py` — bounded refine loop with early stop  
+* `examples/text_ir_showcase.py` — render a prompt as PIR‑TXT  
 * `examples/with_sections.py`, `examples/with_input.py`, `examples/minimal_prompt.py`
 
 ---
@@ -361,6 +502,17 @@ examples/      # runnable examples
 
 ---
 
+## References & further reading
+
+* DSPy: programming with Signatures, modules, and teleprompters — https://dspy.ai/  
+* DSPy paper: “DSPy: Compiling Declarative LM Calls into SOTA Pipelines” — https://arxiv.org/abs/2310.03714  
+* MLIR textual IR and rationale — https://mlir.llvm.org/docs/LangRef/  
+* LLVM IR language reference (text form) — https://llvm.org/docs/LangRef.html  
+* ReAct (reasoning + acting patterns) — https://arxiv.org/abs/2210.03629  
+* LLM‑as‑a‑Judge surveys & benchmarks — https://arxiv.org/abs/2306.05685 ; https://arxiv.org/abs/2411.15594  
+* Dijkstra (1968) “Go To Statement Considered Harmful” — https://homepages.cwi.nl/~storm/teaching/reader/Dijkstra68.pdf
+
+---
 
 ## License
 
