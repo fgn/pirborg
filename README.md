@@ -6,11 +6,12 @@
 # pirborg — Prompt Language Intermediate Representation
 
 > **pirborg is an Intermediate Representation (IR), not a hand-authored prompt language.**  
-> You typically **author in a frontend** (e.g., **DSPy**), then **lower to PIR** for analysis, linting, optimization, and codegen. The IR is **verbose by design**, machine-friendly, **deterministic**, and **inspectable** (via **PIR‑TXT**). It comes with **template lints** and **textual feedback** so *reflective optimizers* can **self‑adjust** their template layouts during training.
+> You typically **author in a frontend** (e.g., **DSPy** or pirborg’s own authoring frontend), then **lower to PIR** for analysis, linting, optimization, and codegen. The IR is **verbose by design**, machine-friendly, **deterministic**, and **inspectable** (via **PIR‑TXT**). It comes with **template lints** and **textual feedback** so *reflective optimizers* can **self‑adjust** their template layouts during training.
 
-If **DSPy** introduced structured programming to prompt authoring by turning monolithic prompt blobs into modular functions with typed interfaces, then **pirborg** aims to be the MLIR-equivalent for prompts. It provides an intermediate representation (IR) featuring a clear symbol table, explicit control flow, and well-defined operators, enabling powerful compiler transformations such as operator fusion, splitting, and targeted optimizations.
+If **DSPy** introduced structured programming to prompt authoring by turning monolithic prompt blobs into modular functions with typed interfaces, then **pirborg** aims to be the MLIR-equivalent for prompts. It sits between high-level authoring frontends (such as DSPy or pirborg’s own EDSL) and multiple backend optimizers, providing a stable intermediate representation (IR) featuring a clear symbol table, explicit control flow, and well-defined operators. This design transforms an M×N problem (many authoring frontends multiplied by many optimizer backends) into an M+N solution by enabling any frontend to target PIR and any backend to optimize from PIR.
 
-DSPy is brilliant, and in most cases, you should continue to use DSPy directly. pirborg is designed specifically for advanced compilation workflows, fine-grained optimization, and tooling scenarios where deterministic transformations and robust intermediate representations are essential.
+DSPy is brilliant, and in most cases, you should continue to use DSPy directly. **pirborg** is designed specifically for advanced compilation workflows, fine-grained optimization, and tooling scenarios where deterministic transformations and robust intermediate representations are essential.
+
 
 ---
 
@@ -37,7 +38,7 @@ class Answer(dspy.Module):
 
 ### 2) Lower to pirborg (IR): same contract, structured internals
 
-> In practice a tool does this for you; shown here for transparency.
+> In practice a tool/adapter does this for you; shown here for transparency.
 
 ```python
 from pirborg.edsl import program, inp, section, output, predict
@@ -68,6 +69,49 @@ with program("readme.layers.qa_v1"):
         user="Q: {{ inputs.question }}",
         id="readme.layers.qa_v1.base",
     )
+```
+
+### 2.5) Equvialent PIR-TXT representation of the above.
+The above program can also be represented in **PIR‑TXT**, pirborg’s canonical textual form of the prompt intermediate representation.
+It is fully equivalent to pirborg’s Python object representation (**PromptSpec**), and round-trip conversions between them are lossless.
+Because it is human readable, and thus also easily interpreted by LLMs, **PIR‑TXT** is ideal for reflective optimizers that inspect, reason about, and modify prompt structures safely and deterministically.
+
+```
+pirborg.module @readme.layers.qa_v1 {
+  pirborg.input %question : str {channel = "user", required}
+
+  pirborg.section @format {
+    channel = "system"
+    description = "Response contract."
+    text = "Return JSON with an `answer` field only."
+    output = {
+      key = "answer",
+      json_type = "string",
+      required = true,
+      description = "Primary answer text"
+    }
+  }
+
+  pirborg.section @persona {
+    channel = "system"
+    description = "Assistant stance and tone."
+    text = "You are concise and accurate. If uncertain, say so."
+    optimizable
+  }
+
+  pirborg.message "system" {
+    emit.section @persona
+    emit.literal "\n"
+    emit.section @format
+  }
+
+  pirborg.message "user" {
+    emit.literal "Q: "
+    emit.input %question
+  }
+
+  pirborg.render { engine = "jinja2" strict_undefined }
+}
 ```
 
 ### 3) Optimize (respecting frozen vs. optimizable parts)
@@ -101,7 +145,7 @@ optimized = result.optimized_prompt
 * Provide a **stable IR** that tools can target and generate from.
 * Offer **fine‑grained control** over what is optimizable (sections, inputs, slots, routes).
 * Support **multi‑call prompt graphs** (e.g., ReAct chains), **bounded loops**, and **selection/judging** patterns.
-* Enable **extensible dialects** for code generation (back to DSPy, or to other runtimes such as Go).
+* Enable **extensible dialects** for code generation (back to DSPy, or to other runtimes such as BAML).
 * Ship a **textual format (PIR‑TXT)** and a **deterministic Python EDSL** with round‑trips between them.
 * Supply **static analysis** and **lints** for template correctness and schema hygiene.
 
@@ -171,6 +215,37 @@ with program("readme.blob_to_blocks.v1"):
 ```
 
 ### 2) Partition into **sections** (start of structure)
+Now we partition the prompt into subsections. We do this by hand now but this could also have been done by a downstream optimizier, issuing a `split` operator. 
+
+```python
+with program("readme.blob_to_blocks.v2"):
+    inp.str("question", channel="user", required=True)
+
+    section(
+        "persona",
+        channel="system",
+        optimizable=True,  # let optimizers rewrite only this wording
+        text="You are concise, accurate, and cite facts when uncertain.",
+        description="Assistant tone and stance.",
+    )
+
+    section(
+        "format",
+        channel="system",
+        text="Return JSON with an `answer` field only.",
+        output=output("answer", description="Primary answer text"),
+        description="Response contract (frozen).",
+    )
+
+    base_v2 = predict(
+        system="{{ emit_section('persona') }}\\n{{ emit_section('format') }}",
+        user="Q: {{ inputs.question }}",
+        id="readme.blob_to_blocks.v2.base",
+    )
+```
+
+
+Improve the "Now we partition the prompt into subsections. We do this by hand now but this could also have been done by a downstream optimizier, issuing a split operator. " text
 
 ```python
 with program("readme.blob_to_blocks.v2"):
@@ -415,7 +490,7 @@ for issue in issues:
     print(issue.code, issue.message)
 ```
 
-This enables optimizers to surface **rich textual feedback** when templates violate contracts (e.g., missing placeholders), and lets compilers like GEPA adjust formats safely.
+This enables optimizers to receive precise and actionable textual feedback, including exact span references and symbol information, when templates violate contracts (e.g., missing placeholders), helping reflective prompt optimizers such as GEPA to make corrections safely and deterministically.
 
 ---
 
@@ -507,10 +582,7 @@ examples/      # runnable examples
 * DSPy: programming with Signatures, modules, and teleprompters — https://dspy.ai/  
 * DSPy paper: “DSPy: Compiling Declarative LM Calls into SOTA Pipelines” — https://arxiv.org/abs/2310.03714  
 * MLIR textual IR and rationale — https://mlir.llvm.org/docs/LangRef/  
-* LLVM IR language reference (text form) — https://llvm.org/docs/LangRef.html  
-* ReAct (reasoning + acting patterns) — https://arxiv.org/abs/2210.03629  
-* LLM‑as‑a‑Judge surveys & benchmarks — https://arxiv.org/abs/2306.05685 ; https://arxiv.org/abs/2411.15594  
-* Dijkstra (1968) “Go To Statement Considered Harmful” — https://homepages.cwi.nl/~storm/teaching/reader/Dijkstra68.pdf
+* LLVM IR language reference (text form) — https://llvm.org/docs/LangRef.html 
 
 ---
 
