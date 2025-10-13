@@ -33,6 +33,11 @@
 
 ---
 
+
+## Status
+
+Early-stage software, APIs subject to change. Currently in the process of being open-sourced. Feedback is encouraged.
+
 ## Install (from source)
 
 ```bash
@@ -206,7 +211,6 @@ optimized = result.optimized_prompt
 **Status**
 
 * ✅ **GEPA** backend working (`optimizer="gepa"`).
-* ✅ **DSPy** backend available (`optimizer="dspy"`).
 * 🧭 **OpenEvolve** and **ShinkaEvolve** are on the roadmap.
 
 You can also discover and register optimizers:
@@ -357,11 +361,6 @@ examples/      # runnable examples
 
 ---
 
-## Status
-
-This is early‑stage software. APIs may change. Feedback and issues are welcome.
-
----
 
 ## License
 
