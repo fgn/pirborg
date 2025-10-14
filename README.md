@@ -214,8 +214,8 @@ with program("readme.blob_to_blocks.v1"):
     )
 ```
 
-### 2) Partition into **sections** (start of structure)
-Now we partition the prompt into subsections. We do this by hand now but this could also have been done by a downstream optimizier, issuing a `split` operator. 
+### 2) Factor into **sections** (start of structure)
+We now factor the prompt into named sections. This refactor is shown manually, but a downstream optimizer MAY perform the same semantics‑preserving transformation by applying section.split, which carves out contiguous spans into new sections and replaces them with emit.section at the original call sites—without altering the frozen format contract.
 
 ```python
 with program("readme.blob_to_blocks.v2"):
@@ -245,34 +245,6 @@ with program("readme.blob_to_blocks.v2"):
 ```
 
 
-Improve the "Now we partition the prompt into subsections. We do this by hand now but this could also have been done by a downstream optimizier, issuing a split operator. " text
-
-```python
-with program("readme.blob_to_blocks.v2"):
-    inp.str("question", channel="user", required=True)
-
-    section(
-        "persona",
-        channel="system",
-        optimizable=True,  # let optimizers rewrite only this wording
-        text="You are concise, accurate, and cite facts when uncertain.",
-        description="Assistant tone and stance.",
-    )
-
-    section(
-        "format",
-        channel="system",
-        text="Return JSON with an `answer` field only.",
-        output=output("answer", description="Primary answer text"),
-        description="Response contract (frozen).",
-    )
-
-    base_v2 = predict(
-        system="{{ emit_section('persona') }}\\n{{ emit_section('format') }}",
-        user="Q: {{ inputs.question }}",
-        id="readme.blob_to_blocks.v2.base",
-    )
-```
 
 ### 3) Add **routes** (audience-aware style)
 
