@@ -155,7 +155,7 @@ optimized = result.optimized_prompt
 
 * **IR, not runtime:** A compact Prompt IR (PIR) with a textual form (**PIR‑TXT v1**) and a Python EDSL.
 * **Deterministic authoring:** EDSL primitives ensure reproducible structures; templates default to strict semantics.
-* **Partition + freeze/thaw:** Mark specific **sections/inputs/routes** as optimizable; freeze the rest to bound the search.
+* **Factor + freeze/thaw:** Mark specific **sections/inputs/routes** as optimizable; freeze the rest to bound the search.
 * **Loops & graphs:** Express bounded loops and prompt graphs with selection criteria and optional judges.
 * **Optimizers:** Pluggable backends. **GEPA** works today; **DSPy** optimizers MIPROv2, SIMBA etc, **OpenEvolve** and **ShinkaEvolve** on the roadmap.
 * **Static checks & feedback:** Lints for unused sections, channel violations, incomplete switches, schema collisions, and more—with **textual feedback** designed for reflective optimizers.
@@ -182,7 +182,7 @@ uv pip install gepa     # for GEPA backend
 
 ## Blob → Blocks: a worked example (extended)
 
-We start with **one blob** (1950s-style). We end with **partitioned** sections that an optimizer can safely explore—while our **I/O contract** stays fixed.
+We start with **one blob**. We end with **factored** sections that an optimizer can safely explore—while our **I/O contract** stays fixed.
 
 ### 0) The blob (what you probably ship today)
 
